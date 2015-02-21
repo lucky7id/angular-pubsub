@@ -1,7 +1,6 @@
 module.exports = Class({
 
-    constructor: function($timeout, $q) {
-        this.$timeout = $timeout;
+    constructor: function($q) {
         this.$q = $q;
     },
 
@@ -9,19 +8,13 @@ module.exports = Class({
         any: []
     },
 
-    on: function(type, fn, context) {
-        return this.subscribe(type,fn,context);
-    },
-
-    off: function(type, fn, context) {
-        return this.unsubscribe(type,fn,context);
-    },
+    logger: false,
+    showStackOnLog: false,
 
     subscribe: function(type, fn, context) {
-        console.log(type, fn, context);
         var pubType = type || 'any';
         var action = typeof fn === 'function' ? fn : context[fn];
-        var windowEvent = document.hasOwnProperty('on' + type) || window.hasOwnProperty('on' + type);
+        var windowEvent = document.hasOwnProperty('on' + type) || type === 'storage';
 
         if (typeof this.subscribers[type] === 'undefined') {
             this.subscribers[type] = [];
@@ -31,6 +24,14 @@ module.exports = Class({
             window.addEventListener(type, this);
         }
 
+        //remove dupes
+        this.subscribers[type] = _.filter(this.subscribers[type], function(sub){
+            var eventContext = _.omit(sub.context, ['$scope', 'vm']);
+            var reqestContext = _.omit(context, ['$scope','vm']);
+            var dupe = sub.fn === action &&  _.isEqual(eventContext, reqestContext);
+            return !dupe;
+        });
+
         this.subscribers[type].push({
             type: pubType,
             name: name,
@@ -39,7 +40,8 @@ module.exports = Class({
         });
 
         return {
-            unsubscribe: this.unsubscribe.bind(this, type, fn, context)
+            unsubscribe: this.unsubscribe.bind(this, type, fn, context),
+            traceAll: this.traceAll.bind(this)
         };
     },
 
@@ -49,10 +51,14 @@ module.exports = Class({
         this.fire(event.type);
     },
 
-    Tracer: function(type, name) {
-        return {
+    traceAll: function(showStack) {
+        this.logger = true;
+        this.showStackOnLog = !!showStack;
+        return this.cancelTrace;
+    },
 
-        };
+    cancelTrace: function() {
+        this.logger = false;
     },
 
     unsubscribe: function(type, fn, context) {
@@ -80,10 +86,30 @@ module.exports = Class({
         return defered.promise;
     },
 
+    _log: function(sub, data, type) {
+        var log = {};
+        var self = this;
+
+        if (!this.logger) {return;}
+
+        log.fn = sub.fn.name || sub.fn.prototype;
+        log.data = data;
+        log.event = type;
+        console.log(log);
+        this._generateStack();
+    },
+
+    _generateStack: function() {
+        if (!this.showStackOnLog) {return;}
+        console.error(new Error('stackTrace').stack);
+    },
+
     _publish: function(type, data, promise) {
+        var self = this;
         var subs = this.subscribers[type];
 
         _.map(subs, function(sub){
+            self._log(sub, data, type);
             sub.fn.call(sub.context, {data: data});
             return sub;
         });
